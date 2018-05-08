@@ -3299,6 +3299,106 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             Assert.True(totalReceived >= minimumBytes, $"{nameof(AssertStreamCompleted)} Stream aborted prematurely.");
         }
 
+        [Fact]
+        public async Task ConnectionResetObservedInWriteCallbackIsNotLoggedHigherThanDebug()
+        {
+            const int connectionPausedEventId = 4;
+            const int connectionResetEventId = 19;
+            const int maxRequestBufferSize = 4096;
+
+            var readCallbackUnwired = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var appFuncCompleted = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var loggedHigherThanDebug = false;
+            var connectionResetLogged = false;
+
+            var mockLogger = new Mock<ILogger>();
+            mockLogger
+                .Setup(logger => logger.IsEnabled(It.IsAny<LogLevel>()))
+                .Returns(true);
+            mockLogger
+                .Setup(logger => logger.Log(It.IsAny<LogLevel>(), It.IsAny<EventId>(), It.IsAny<object>(), It.IsAny<Exception>(), It.IsAny<Func<object, Exception, string>>()))
+                .Callback<LogLevel, EventId, object, Exception, Func<object, Exception, string>>((logLevel, eventId, state, exception, formatter) =>
+                {
+                    if (logLevel > LogLevel.Debug)
+                    {
+                        loggedHigherThanDebug = true;
+                    }
+
+                    if (eventId.Id == connectionPausedEventId)
+                    {
+                        readCallbackUnwired.TrySetResult(null);
+                    }
+                    else if (eventId.Id == connectionResetEventId)
+                    {
+                        connectionResetLogged = true;
+                    }
+
+                    Logger.Log(logLevel, eventId, state, exception, formatter);
+                });
+
+            var mockLoggerFactory = new Mock<ILoggerFactory>();
+            mockLoggerFactory
+                .Setup(factory => factory.CreateLogger(It.IsAny<string>()))
+                .Returns(Logger);
+            mockLoggerFactory
+                .Setup(factory => factory.CreateLogger(It.IsIn("Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv",
+                                                               "Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets")))
+                .Returns(mockLogger.Object);
+
+            var scratchBuffer = new byte[maxRequestBufferSize * 8];
+
+            var testContext = new TestServiceContext(mockLoggerFactory.Object)
+            {
+                ServerOptions =
+                {
+                    Limits =
+                    {
+                        MaxRequestBufferSize = maxRequestBufferSize,
+                        MaxRequestLineSize = maxRequestBufferSize,
+                        MaxRequestHeadersTotalSize = maxRequestBufferSize,
+                    }
+                }
+            };
+
+            using (var server = new TestServer(async context =>
+            {
+                // Wait until the read callback is no longer hooked up so that the connection
+                // reset can only be observed via a write callback
+                await readCallbackUnwired.Task;
+
+                // 32 GB should be enough to make an RST observable;
+                for (var i = 0; i < 1024 * 1024; i++)
+                {
+                    await context.Response.Body.WriteAsync(scratchBuffer, 0, scratchBuffer.Length);
+                }
+
+                // Writing to the body shouldn't throw since the request aborted token wasn't passed in.
+                appFuncCompleted.SetResult(null);
+            }, testContext))
+            {
+                using (var connection = server.CreateConnection())
+                {
+                    await connection.Send(
+                        "POST / HTTP/1.1",
+                        "Host:",
+                        $"Content-Length: {scratchBuffer.Length}",
+                        "",
+                        "");
+
+                    var ignore = connection.Stream.WriteAsync(scratchBuffer, 0, scratchBuffer.Length);
+
+                    // Wait until the read callback is no longer hooked up so that the connection disconnect isn't observed.
+                    await readCallbackUnwired.Task.TimeoutAfter(TestConstants.DefaultTimeout);
+                }
+
+                await appFuncCompleted.Task.TimeoutAfter(TestConstants.DefaultTimeout);
+
+                // After the app is done with the write loop, the connection reset should be logged.
+                Assert.True(connectionResetLogged, "Connection reset not logged.");
+                Assert.False(loggedHigherThanDebug, "Logged message with level higher than debug.");
+            }
+        }
+
         public static TheoryData<string, StringValues, string> NullHeaderData
         {
             get

@@ -68,7 +68,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
 
                 StartReading();
 
-                Exception error = null;
+                Exception inputError = null;
+                Exception outputError = null;
 
                 try
                 {
@@ -79,17 +80,27 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
                 }
                 catch (UvException ex)
                 {
-                    if (ex.StatusCode != LibuvConstants.ECANCELED)
+                    // The connection reset/error has already been logged by LibuvOutputConsumer
+                    if (ex.StatusCode == LibuvConstants.ECANCELED)
                     {
-                        // ECANCELED errors will become a ConnectionAbortedExceptions below.
-                        error = new IOException(ex.Message, ex);
+                        // Connection was aborted.
+                    }
+                    else if (LibuvConstants.IsConnectionReset(ex.StatusCode))
+                    {
+                        // Don't cause writes to throw for connection resets.
+                        inputError = new ConnectionResetException(ex.Message, ex);
+                    }
+                    else
+                    {
+                        inputError = ex;
+                        outputError = ex;
                     }
                 }
                 finally
                 {
                     // Now, complete the input so that no more reads can happen
-                    Input.Complete(error ?? new ConnectionAbortedException());
-                    Output.Complete(error);
+                    Input.Complete(inputError ?? new ConnectionAbortedException());
+                    Output.Complete(outputError);
 
                     // Make sure it isn't possible for a paused read to resume reading after calling uv_close
                     // on the stream handle
@@ -168,7 +179,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
                 // Given a negative status, it's possible that OnAlloc wasn't called.
                 _socket.ReadStop();
 
-                IOException error = null;
+                Exception error = null;
 
                 if (status == LibuvConstants.EOF)
                 {
@@ -178,9 +189,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
                 {
                     handle.Libuv.Check(status, out var uvError);
 
-                    // Log connection resets at a lower (Debug) level.
-                    if (LibuvConstants.IsConnectionReset(status))
+                    if (status == LibuvConstants.ECANCELED)
                     {
+                        error = new ConnectionAbortedException(uvError.Message, uvError);
+                    }
+                    else if (LibuvConstants.IsConnectionReset(status))
+                    {
+                        // Log connection resets at a lower (Debug) level.
                         Log.ConnectionReset(ConnectionId);
                         error = new ConnectionResetException(uvError.Message, uvError);
                     }
