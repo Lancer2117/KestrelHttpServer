@@ -55,7 +55,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
                         remoteEndPoint = tcpHandle.GetPeerIPEndPoint();
                         localEndPoint = tcpHandle.GetSockIPEndPoint();
                     }
-                    catch (UvException ex) when (ex.StatusCode == LibuvConstants.EINVAL)
+                    catch (UvException ex) when (LibuvConstants.IsConnectionReset(ex.StatusCode))
                     {
                         TransportContext.Log.ConnectionReset("(null)");
                         socket.Dispose();

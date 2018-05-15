@@ -156,7 +156,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
                 // Today it's handled specifically for http but not for aribitrary middleware
                 _ = HandleConnectionAsync(acceptSocket);
             }
-            catch (UvException ex) when (ex.StatusCode == LibuvConstants.EINVAL)
+            catch (UvException ex) when (LibuvConstants.IsConnectionReset(ex.StatusCode))
             {
                 Log.ConnectionReset("(null)");
                 acceptSocket.Dispose();
