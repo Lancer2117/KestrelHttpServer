@@ -35,7 +35,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Tests
                         Thread = thread
                     };
                     var socket = new MockSocket(mockLibuv, Thread.CurrentThread.ManagedThreadId, transportContext.Log);
-                    var connection = new LibuvConnection(socket, listenerContext.TransportContext.Log, thread);
+                    var connection = new LibuvConnection(socket, listenerContext.TransportContext.Log, thread, null, null);
                     listenerContext.TransportContext.ConnectionDispatcher.OnConnection(connection);
                     connectionTask = connection.Start();
 
@@ -90,7 +90,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Tests
                         Thread = thread
                     };
                     var socket = new MockSocket(mockLibuv, Thread.CurrentThread.ManagedThreadId, transportContext.Log);
-                    var connection = new LibuvConnection(socket, listenerContext.TransportContext.Log, thread);
+                    var connection = new LibuvConnection(socket, listenerContext.TransportContext.Log, thread, null, null);
                     listenerContext.TransportContext.ConnectionDispatcher.OnConnection(connection);
                     connectionTask = connection.Start();
 
@@ -159,7 +159,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Tests
                         Thread = thread
                     };
                     var socket = new MockSocket(mockLibuv, Thread.CurrentThread.ManagedThreadId, transportContext.Log);
-                    var connection = new LibuvConnection(socket, listenerContext.TransportContext.Log, thread);
+                    var connection = new LibuvConnection(socket, listenerContext.TransportContext.Log, thread, null, null);
                     listenerContext.TransportContext.ConnectionDispatcher.OnConnection(connection);
                     connectionTask = connection.Start();
 
@@ -226,7 +226,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Tests
                         Thread = thread
                     };
                     var socket = new MockSocket(mockLibuv, Thread.CurrentThread.ManagedThreadId, transportContext.Log);
-                    var connection = new LibuvConnection(socket, listenerContext.TransportContext.Log, thread);
+                    var connection = new LibuvConnection(socket, listenerContext.TransportContext.Log, thread, null, null);
                     listenerContext.TransportContext.ConnectionDispatcher.OnConnection(connection);
                     connectionTask = connection.Start();
 

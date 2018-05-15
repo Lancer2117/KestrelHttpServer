@@ -5,6 +5,7 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.IO.Pipelines;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Connections;
@@ -29,24 +30,17 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
 
         private MemoryHandle _bufferHandle;
 
-        public LibuvConnection(UvStreamHandle socket, ILibuvTrace log, LibuvThread thread)
+        public LibuvConnection(UvStreamHandle socket, ILibuvTrace log, LibuvThread thread, IPEndPoint remoteEndPoint, IPEndPoint localEndPoint)
         {
             _socket = socket;
 
-            if (_socket is UvTcpHandle tcpHandle)
-            {
-                var remoteEndPoint = tcpHandle.GetPeerIPEndPoint();
-                var localEndPoint = tcpHandle.GetSockIPEndPoint();
+            RemoteAddress = remoteEndPoint?.Address;
+            RemotePort = remoteEndPoint?.Port ?? 0;
 
-                RemoteAddress = remoteEndPoint.Address;
-                RemotePort = remoteEndPoint.Port;
+            LocalAddress = localEndPoint?.Address;
+            LocalPort = localEndPoint?.Port ?? 0;
 
-                LocalAddress = localEndPoint.Address;
-                LocalPort = localEndPoint.Port;
-
-                ConnectionClosed = _connectionClosedTokenSource.Token;
-            }
-
+            ConnectionClosed = _connectionClosedTokenSource.Token;
             Log = log;
             Thread = thread;
         }
@@ -188,22 +182,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
                 else
                 {
                     handle.Libuv.Check(status, out var uvError);
-
-                    if (status == LibuvConstants.ECANCELED)
-                    {
-                        error = new ConnectionAbortedException(uvError.Message, uvError);
-                    }
-                    else if (LibuvConstants.IsConnectionReset(status))
-                    {
-                        // Log connection resets at a lower (Debug) level.
-                        Log.ConnectionReset(ConnectionId);
-                        error = new ConnectionResetException(uvError.Message, uvError);
-                    }
-                    else
-                    {
-                        Log.ConnectionError(ConnectionId, uvError);
-                        error = new IOException(uvError.Message, uvError);
-                    }
+                    error = LogAndWrapReadError(uvError);
                 }
 
                 // Complete after aborting the connection
@@ -236,10 +215,27 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
             {
                 // ReadStart() can throw a UvException in some cases (e.g. socket is no longer connected).
                 // This should be treated the same as OnRead() seeing a negative status.
-                Log.ConnectionReadFin(ConnectionId);
-                var error = new IOException(ex.Message, ex);
+                Input.Complete(LogAndWrapReadError(ex));
+            }
+        }
 
-                Input.Complete(error);
+        private Exception LogAndWrapReadError(UvException uvError)
+        {
+            if (uvError.StatusCode == LibuvConstants.ECANCELED)
+            {
+                // The operation was canceled by the server not the client. No need for additional logs.
+                return new ConnectionAbortedException(uvError.Message, uvError);
+            }
+            else if (LibuvConstants.IsConnectionReset(uvError.StatusCode))
+            {
+                // Log connection resets at a lower (Debug) level.
+                Log.ConnectionReset(ConnectionId);
+                return new ConnectionResetException(uvError.Message, uvError);
+            }
+            else
+            {
+                Log.ConnectionError(ConnectionId, uvError);
+                return new IOException(uvError.Message, uvError);
             }
         }
 
