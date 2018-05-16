@@ -105,13 +105,17 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
             {
                 await ProcessReceives();
             }
-            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset ||
+                                             ex.SocketErrorCode == SocketError.ConnectionAborted)
             {
-                error = new ConnectionResetException(ex.Message, ex);
-                _trace.ConnectionReset(ConnectionId);
+                // A connection reset can be reported as SocketError.ConnectionAborted on Windows
+                if (!_aborted)
+                {
+                    error = new ConnectionResetException(ex.Message, ex);
+                    _trace.ConnectionReset(ConnectionId);
+                }
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
-                                             ex.SocketErrorCode == SocketError.ConnectionAborted ||
                                              ex.SocketErrorCode == SocketError.Interrupted ||
                                              ex.SocketErrorCode == SocketError.InvalidArgument)
             {
