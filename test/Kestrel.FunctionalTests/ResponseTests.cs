@@ -2439,12 +2439,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         public async Task AppCanHandleClientAbortingConnectionMidResponse(ListenOptions listenOptions)
         {
             const int connectionResetEventId = 19;
+            const int connectionFinEventId = 6;
             const int responseBodySegmentSize = 65536;
             const int responseBodySegmentCount = 100;
 
             var appCompletedTcs = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
             var loggedHigherThanDebug = false;
             var connectionResetLogged = false;
+            var connectionFinLogged = false;
             var requestAborted = false;
 
             var mockKestrelTrace = new Mock<KestrelTrace>(Logger) { CallBase = true };
@@ -2465,6 +2467,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     if (eventId.Id == connectionResetEventId)
                     {
                         connectionResetLogged = true;
+                    }
+                    else if (eventId.Id == connectionFinEventId)
+                    {
+                        connectionFinLogged = true;
                     }
 
                     Logger.Log(logLevel, eventId, state, exception, formatter);
@@ -2521,7 +2527,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 await appCompletedTcs.Task.TimeoutAfter(TestConstants.DefaultTimeout);
 
                 // After the app is done with the write loop, the connection reset should be logged.
-                Assert.True(connectionResetLogged, "Connection reset not logged.");
+                // On Linux and macOS, the connection close is still sometimes observed as a FIN despite the LingerState.
+                Assert.True(connectionResetLogged || (!TestPlatformHelper.IsWindows && connectionFinLogged), "Connection reset not logged.");
             }
 
             mockKestrelTrace.Verify(t => t.ConnectionStop(It.IsAny<string>()), Times.Once());
