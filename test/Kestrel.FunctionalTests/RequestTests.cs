@@ -1306,6 +1306,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         [MemberData(nameof(ConnectionAdapterData))]
         public async Task AppCanHandleClientAbortingConnectionMidRequest(ListenOptions listenOptions)
         {
+            var appStartedTcs = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
             var readTcs = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             var mockKestrelTrace = new Mock<KestrelTrace>(Logger) { CallBase = true };
@@ -1318,6 +1319,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
 
             using (var server = new TestServer(async context =>
             {
+                appStartedTcs.SetResult(null);
+
                 try
                 {
                     await context.Request.Body.CopyToAsync(Stream.Null);;
@@ -1341,7 +1344,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                         "",
                         "");
 
+                    await appStartedTcs.Task.TimeoutAfter(TestConstants.DefaultTimeout);
+
                     await connection.Stream.WriteAsync(scratchBuffer, 0, scratchBuffer.Length);
+
+                    // Force a reset
+                    connection.Socket.LingerState = new LingerOption(true, 0);
                 }
 
                 await Assert.ThrowsAnyAsync<IOException>(() => readTcs.Task).TimeoutAfter(TestConstants.DefaultTimeout);
